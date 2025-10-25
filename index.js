@@ -88,13 +88,19 @@ async function run() {
 
             let filter = {};
 
-            if (query) {
+            if (query && category) {
+                filter = {
+                    $or: [
+                        { title: { $regex: query, $options: 'i' } },
+                        { select: { $regex: category, $options: 'i' } }
+                    ]
+                };
+            } else if (query) {
                 filter = { title: { $regex: query, $options: 'i' } };
+            } else if (category) {
+                filter = { select: { $regex: category, $options: 'i' } };
             }
 
-            if (category) {
-                filter = { select: { $regex: category } }
-            }
 
             const result = await blogsCollection.find(filter).toArray();
             res.send(result);
@@ -102,10 +108,10 @@ async function run() {
 
         // getblog for recent section
         app.get('/recentBlogs', async (req, res) => {
-            const result = await blogsCollection.find().sort({_id:-1}).limit(6).toArray();
+            const result = await blogsCollection.find().sort({ _id: -1 }).limit(8).toArray();
             res.send(result);
         })
- 
+
 
         // get a specific blog
         app.get('/allblogs/:id', async (req, res) => {
@@ -131,6 +137,18 @@ async function run() {
             res.send(result);
         });
 
+
+        // delete blog
+        app.delete('/myBlogs/:id', async (req, res) => {
+            try {
+                const id = req.params.id;
+                const filter = { _id: new ObjectId(id) };
+                const result = await blogsCollection.deleteOne(filter);
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ message: error.message })
+            }
+        })
 
         // update page for specific data
         app.get('/update/:id', firebaseTokenVerification, async (req, res) => {
@@ -228,6 +246,86 @@ async function run() {
             const result = await commentsCollection.find(query).toArray();
             res.send(result)
         })
+
+
+
+        // ✅ Like Route
+        app.patch('/blogs/:id/like', async (req, res) => {
+            const id = req.params.id;
+            const userEmail = req.body.email;
+            const blog = await blogsCollection.findOne({ _id: new ObjectId(id) });
+
+            if (!blog) return res.status(404).send({ error: "Blog not found" });
+
+            const alreadyLiked = blog.likes.includes(userEmail);
+            const alreadyUnliked = blog.unlikes.includes(userEmail);
+
+            let updateDoc;
+
+            if (alreadyLiked) {
+                updateDoc = { $pull: { likes: userEmail } };
+            } else {
+                updateDoc = {
+                    $push: { likes: userEmail },
+                    ...(alreadyUnliked && { $pull: { unlikes: userEmail } })
+                };
+            }
+
+            const result = await blogsCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
+            res.send(result);
+        });
+
+        //  Unlike Route
+        app.patch('/blogs/:id/unlike', async (req, res) => {
+            const id = req.params.id;
+            const userEmail = req.body.email;
+            const blog = await blogsCollection.findOne({ _id: new ObjectId(id) });
+
+            if (!blog) return res.status(404).send({ error: "Blog not found" });
+
+            const alreadyLiked = blog.likes.includes(userEmail);
+            const alreadyUnliked = blog.unlikes.includes(userEmail);
+
+            let updateDoc;
+
+            if (alreadyUnliked) {
+                updateDoc = { $pull: { unlikes: userEmail } };
+            } else {
+                updateDoc = {
+                    $push: { unlikes: userEmail },
+                    ...(alreadyLiked && { $pull: { likes: userEmail } })
+                };
+            }
+
+            const result = await blogsCollection.updateOne({ _id: new ObjectId(id) }, updateDoc);
+            res.send(result);
+        });
+
+
+
+        // PATCH: Add a reply to a comment
+        app.patch("/comments/:id/reply", async (req, res) => {
+            const { id } = req.params;
+            const { userName, replyText , userPhoto } = req.body;
+
+            const reply = { userName, replyText , userPhoto };
+
+            try {
+                const result = await commentsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $push: { replies: reply } } // MongoDB array push
+                );
+
+                if (result.modifiedCount > 0) {
+                    res.send({ success: true, message: "Reply added successfully", reply });
+                } else {
+                    res.status(404).send({ success: false, message: "Comment not found" });
+                }
+            } catch (error) {
+                console.error("Error adding reply:", error);
+                res.status(500).send({ success: false, message: "Server error" });
+            }
+        });
 
 
     } finally {
